@@ -1,0 +1,36 @@
+# General
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
+
+# Python / Backend
+backend/__pycache__/
+backend/*.py[cod]
+backend/*$py.class
+backend/venv/
+backend/.venv/
+backend/env/
+backend/.env
+backend/.pytest_cache/
+backend/temp_vclusters/
+backend/saved_clusters.json
+backend/settings.json
+backend/*.exe
+# Ignore locally downloaded tools if appropriate, generally good practice to not commit binaries
+*.exe
+*.dll
+
+# Node.js / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
