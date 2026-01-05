@@ -38,7 +38,10 @@ Built with **TypeScript** and **Vite**, the frontend provides a modern web inter
    # or
    pip install -r requirements.txt
    ```
-4. Configure environment variables (copy `.env.example` if available).
+4. Start the development server:
+   ```bash
+   python -m uvicorn app.main:app --reload
+   ```
 
 ### Frontend Setup
 1. Navigate to the frontend directory:
@@ -56,6 +59,3 @@ Built with **TypeScript** and **Vite**, the frontend provides a modern web inter
 
 ## Key Configuration
 The application uses local configuration files like `saved_clusters.json` and `settings.json` in the backend to manage cluster connections and user preferences. Ensure these are properly configured during the first run.
-
-## License
-[Insert License Here]
