@@ -16,10 +16,12 @@ class FixWorkflowService:
     def __init__(self, 
                  sim_adapter: SimulationEnginePort, 
                  llm_adapter: LLMProviderPort,
-                 cluster_registry: Dict[str, ClusterProviderPort]):
+                 cluster_registry: Dict[str, ClusterProviderPort],
+                 on_workflow_complete: Any = None):
         self.sim_adapter = sim_adapter
         self.llm_adapter = llm_adapter
         self.cluster_registry = cluster_registry # Active connections
+        self.on_workflow_complete = on_workflow_complete
 
     async def start_fix_workflow(self, cluster_id: str, resource_id: str, issue_description: str) -> str:
         workflow_id = str(uuid.uuid4())
@@ -171,9 +173,8 @@ class FixWorkflowService:
             log("Detailed post-fix analysis complete.")
             log("Process Finished Successfully.")
             state["status"] = "completed"
-            
-            # Cleanup
-            # await self.sim_adapter.destroy_shadow_env(shadow_cluster.id)
+            if self.on_workflow_complete:
+                self.on_workflow_complete(workflow_id, state)
             
         except Exception as e:
             import traceback
@@ -181,6 +182,20 @@ class FixWorkflowService:
             log(f"CRITICAL ERROR: {repr(e)}\nTraceback:\n{tb}")
             state["status"] = "failed"
             logging.exception("Workflow Failed")
+        finally:
+            if "vcluster_id" in state and state["vcluster_id"]:
+                log(f"Automatic Cleanup: Destroying VCluster {state['vcluster_id']}...")
+                try:
+                    # Clear reference so it doesn't try twice if workflow complete callback triggers again
+                    vid = state["vcluster_id"]
+                    state["vcluster_id"] = None
+                    await self.sim_adapter.destroy_shadow_env(vid)
+                    log("VCluster destroyed successfully.")
+                except Exception as cleanup_err:
+                    log(f"Warning during cleanup: {cleanup_err}")
+
+            if self.on_workflow_complete:
+                self.on_workflow_complete(workflow_id, state)
 
     def get_workflow_status(self, workflow_id: str):
         return workflow_store.get(workflow_id)

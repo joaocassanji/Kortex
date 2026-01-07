@@ -18,23 +18,111 @@ class LangChainAdapter(LLMProviderPort):
         self.parser = PydanticOutputParser(pydantic_object=AnalysisResult)
 
     async def analyze_context(self, context: List[KubernetesResource], query: str) -> AnalysisResult:
-        # Create a condensed context string
-        context_str = json.dumps([r.dict(exclude={'content': {'managedFields'}}) for r in context], indent=2)
+        # Create a condensed context string to save tokens and focus attention
+        context_summary = []
+        for r in context:
+            # Include essential fields, exclude extensive status/managedFields
+            summary = {
+                "kind": r.kind,
+                "name": r.name,
+                "namespace": r.namespace,
+                "uid": r.unique_id,
+                "spec": r.content.get("spec", {}),
+                "metadata": {k: v for k, v in r.content.get("metadata", {}).items() if k in ["labels", "annotations"]}
+            }
+            context_summary.append(summary)
+            
+        context_str = json.dumps(context_summary, indent=2)
         
+        example_output = {
+            "summary": "The namespace contains several critical security issues, including privileged containers and missing resource limits.",
+            "issues": [
+                {
+                    "severity": "HIGH",
+                    "category": "SECURITY",
+                    "title": "Privileged Container Detected",
+                    "description": "The pod 'nginx-app' is running as privileged.",
+                    "affected_resource_ids": ["uid-123"],
+                    "remediation_suggestion": {
+                        "description": "Remove securityContext.privileged flag.",
+                        "action_type": "PATCH",
+                        "manifest": {},
+                        "target_resource_id": "uid-123"
+                    }
+                }
+            ]
+        }
+        example_str = json.dumps(example_output, indent=2)
+
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a Senior Kubernetes Site Reliability Engineer. Analyze the given Kubernetes resources for security, performance, and reliability issues. Output STRICT JSON matching the AnalysisResult schema."),
-            ("user", "Context:\n{context}\n\nUser Query: {query}\n\nProvide analysis:")
+            ("system", "You are a Senior Kubernetes Site Reliability Engineer available to analyze cluster resources."),
+            ("user", "CONTEXT RESOURCES (JSON):\n{context}\n\n"
+                     "INSTRUCTION: {query}\n\n"
+                     "CRITICAL OUTPUT RULES:\n"
+                     "1. Respond ONLY with valid JSON. Do not include markdown keys or explanations outside the JSON.\n"
+                     "2. You MUST return an object with 'summary' (string) and 'issues' (list of objects).\n"
+                     "3. For each issue, you MUST valid 'affected_resource_ids' from the Context.\n"
+                     "4. Use the following exact JSON schema:\n{example_str}\n\n"
+                     "START ANALYSIS AND GENERATE JSON:")
         ])
         
-        chain = prompt | self.llm | self.parser
+        # Remove parser from chain to avoid validation errors on raw output
+        chain = prompt | self.llm
         
         try:
-            result = await chain.ainvoke({"context": context_str, "query": query})
-            return result
+            response = await chain.ainvoke({
+                "context": context_str, 
+                "query": query,
+                "example_str": example_str
+            })
+            
+            # Manual Parsing Logic (Same as analyze_resource)
+            content = response.content if hasattr(response, 'content') else str(response)
+            content = content.replace("```json", "").replace("```", "").strip()
+            
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError:
+                print(f"Failed to parse JSON content: {content[:200]}...")
+                return AnalysisResult(summary="Analysis failed: Invalid JSON output from AI.", issues=[])
+
+            # Smart Unwrapping
+            if "summary" not in data and "issues" not in data:
+                for key in ["analysis_result", "AnalysisResult", "result", "output", "json"]:
+                    if key in data and isinstance(data[key], dict):
+                        data = data[key]
+                        break
+            
+            # Extract Summary
+            summary_raw = data.get("summary", "Analysis completed.")
+            if isinstance(summary_raw, (list, dict)):
+                summary = json.dumps(summary_raw)
+            else:
+                summary = str(summary_raw)
+
+            # Extract Issues
+            issues_data = data.get("issues", [])
+            issues = []
+            for i in issues_data:
+                try:
+                    # Severity Normalization
+                    if "severity" in i:
+                        i["severity"] = i["severity"].upper()
+                        if i["severity"] not in ["LOW", "MEDIUM", "HIGH", "CRITICAL"]:
+                            i["severity"] = "LOW"
+                    if "category" in i:
+                         i["category"] = i["category"].upper()
+                    
+                    issues.append(Issue(**i))
+                except Exception as e:
+                    print(f"Skipping invalid issue: {e}")
+                    continue
+            
+            return AnalysisResult(summary=summary, issues=issues)
+
         except Exception as e:
-            # Fallback or error handling
-            print(f"LLM Error: {e}")
-            return AnalysisResult(summary="Analysis failed due to LLM error.", issues=[])
+            print(f"LLM Error in analyze_context: {e}")
+            return AnalysisResult(summary=f"Analysis failed due to error: {str(e)}", issues=[])
 
     async def analyze_resource(self, target: KubernetesResource, context: List[KubernetesResource]) -> AnalysisResult:
         # Context strategy: Filter to relevant namespace + cluster scoped to reduce noise?

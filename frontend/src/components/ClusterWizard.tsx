@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Server, Wifi, Save, PlayCircle, Plus, HardDrive, Globe, AlertTriangle, Loader2 } from 'lucide-react';
+import { Server, Wifi, Save, PlayCircle, Plus, HardDrive, Globe, AlertTriangle, Loader2, Trash2 } from 'lucide-react';
+import { deleteCluster } from '../services/api';
 
 interface SavedCluster {
     id: string;
@@ -26,6 +27,7 @@ export default function ClusterWizard({ onConnect }: ClusterWizardProps) {
     // New state for list view connection feedback
     const [connectingId, setConnectingId] = useState<string | null>(null);
     const [connectionError, setConnectionError] = useState<React.ReactNode | null>(null);
+    const [deletingClusterId, setDeletingClusterId] = useState<string | null>(null);
 
     useEffect(() => {
         fetchClusters();
@@ -41,7 +43,28 @@ export default function ClusterWizard({ onConnect }: ClusterWizardProps) {
         }
     };
 
+    const handleDeleteClick = (e: React.MouseEvent, clusterId: string) => {
+        e.stopPropagation();
+        setDeletingClusterId(clusterId);
+    }
+
+    const confirmDelete = async () => {
+        if (!deletingClusterId) return;
+        try {
+            await deleteCluster(deletingClusterId);
+            setDeletingClusterId(null);
+            fetchClusters();
+        } catch (e) {
+            console.error("Failed to delete", e);
+        }
+    }
+
+    const cancelDelete = () => {
+        setDeletingClusterId(null);
+    }
+
     const handleTest = async () => {
+        // ... existing handleTest ...
         setLoading(true);
         setTestStatus('idle');
         setTestMessage('');
@@ -75,7 +98,6 @@ export default function ClusterWizard({ onConnect }: ClusterWizardProps) {
         }
     };
 
-    // Helper for "Remote" text area - simplistic JSON check
     const getPayload = () => {
         if (mode === 'local') return { kubeconfig_path: path };
         try {
@@ -86,13 +108,22 @@ export default function ClusterWizard({ onConnect }: ClusterWizardProps) {
     }
 
     const handleSaveAndConnect = async () => {
+        if (!name.trim()) {
+            setTestStatus('error');
+            setTestMessage("Please enter a name for this cluster.");
+            return;
+        }
+
         setLoading(true);
+        setTestStatus('idle');
+        setTestMessage('');
         try {
             let payload: any = getPayload();
 
             // If parsing failed for remote
             if (!payload && mode === 'remote') {
-                alert("For this MVP, please paste Kubeconfig in JSON format.");
+                setTestStatus('error');
+                setTestMessage("Invalid Format. For this MVP, please paste Kubeconfig in JSON format.");
                 setLoading(false);
                 return;
             }
@@ -129,7 +160,7 @@ export default function ClusterWizard({ onConnect }: ClusterWizardProps) {
     };
 
     const connectToSaved = async (c: SavedCluster) => {
-        if (connectingId) return; // Prevent multiple clicks
+        if (connectingId || deletingClusterId) return; // Prevent multiple clicks
         setConnectingId(c.id);
         setConnectionError(null);
 
@@ -163,7 +194,40 @@ export default function ClusterWizard({ onConnect }: ClusterWizardProps) {
 
     if (view === 'list' && savedClusters.length > 0) {
         return (
-            <div className="w-full max-w-md mx-auto mt-20 p-6 bg-card border border-border rounded-lg shadow-xl">
+            <div className="w-full max-w-md mx-auto mt-20 p-6 bg-card border border-border rounded-lg shadow-xl relative">
+                {/* Delete Confirmation Overlay */}
+                {deletingClusterId && (
+                    <div className="absolute inset-0 bg-background/95 backdrop-blur-sm z-20 flex items-center justify-center rounded-lg p-6 animate-in fade-in duration-200">
+                        <div className="text-center space-y-4">
+                            <div className="mx-auto w-12 h-12 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full flex items-center justify-center">
+                                <Trash2 size={24} />
+                            </div>
+                            <h3 className="text-lg font-semibold">Delete Cluster?</h3>
+                            <p className="text-sm text-muted-foreground">
+                                Are you sure you want to remove
+                                <span className="font-medium text-foreground mx-1">
+                                    {savedClusters.find(c => c.id === deletingClusterId)?.name}
+                                </span>
+                                from your saved list?
+                            </p>
+                            <div className="flex gap-3 justify-center pt-2">
+                                <button
+                                    onClick={cancelDelete}
+                                    className="px-4 py-2 rounded-md hover:bg-muted font-medium text-sm transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={confirmDelete}
+                                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md font-medium text-sm transition-colors shadow-sm"
+                                >
+                                    Delete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 <h2 className="text-2xl font-bold mb-6 text-center">Select Cluster</h2>
 
                 {connectionError && (
@@ -181,7 +245,7 @@ export default function ClusterWizard({ onConnect }: ClusterWizardProps) {
                         <div
                             key={c.id}
                             onClick={() => connectToSaved(c)}
-                            className={`flex items-center justify-between p-4 bg-muted/30 border border-border rounded-lg cursor-pointer transition-colors group ${connectingId === c.id ? 'bg-muted/50 border-primary/50' : 'hover:bg-muted/50'}`}
+                            className={`relative flex items-center justify-between p-4 bg-muted/30 border border-border rounded-lg cursor-pointer transition-colors group ${connectingId === c.id ? 'bg-muted/50 border-primary/50' : 'hover:bg-muted/50'}`}
                         >
                             <div className="flex items-center gap-3">
                                 <div className={`p-2 rounded-full ${c.type === 'local' ? 'bg-blue-500/10 text-blue-400' : 'bg-purple-500/10 text-purple-400'} ${connectingId === c.id ? 'animate-pulse' : ''}`}>
@@ -192,11 +256,22 @@ export default function ClusterWizard({ onConnect }: ClusterWizardProps) {
                                     {connectingId === c.id && <span className="text-xs font-normal text-muted-foreground ml-2 animate-pulse">Connecting...</span>}
                                 </div>
                             </div>
-                            {connectingId === c.id ? (
-                                <Loader2 className="animate-spin text-primary" size={20} />
-                            ) : (
-                                <PlayCircle className="opacity-0 group-hover:opacity-100 text-primary transition-opacity" />
-                            )}
+                            <div className="flex items-center gap-2">
+                                {connectingId === c.id ? (
+                                    <Loader2 className="animate-spin text-primary" size={20} />
+                                ) : (
+                                    <>
+                                        <button
+                                            onClick={(e) => handleDeleteClick(e, c.id)}
+                                            className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-md transition-colors opacity-0 group-hover:opacity-100"
+                                            title="Remove Cluster"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                        <PlayCircle className="opacity-0 group-hover:opacity-100 text-primary transition-opacity" />
+                                    </>
+                                )}
+                            </div>
                         </div>
                     ))}
                 </div>
@@ -293,7 +368,7 @@ export default function ClusterWizard({ onConnect }: ClusterWizardProps) {
                     </button>
                     <button
                         onClick={handleSaveAndConnect}
-                        disabled={loading || testStatus !== 'success' || !name}
+                        disabled={loading}
                         className="flex-1 px-6 py-2.5 bg-primary text-primary-foreground rounded-lg hover:bg-white/90 font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <Save size={18} /> Save & Connect

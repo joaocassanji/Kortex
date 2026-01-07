@@ -6,6 +6,9 @@ from app.domain.models import KubernetesResource, Cluster
 import yaml
 import os
 
+KORTEX_ANNOTATION = "kortex.io/managed"
+KORTEX_VALUE = "true"
+
 class KubernetesAdapter(ClusterProviderPort):
     def __init__(self, kubeconfig_path: Optional[str] = None, kubeconfig_content: Optional[Dict[str, Any]] = None):
         self.kubeconfig_path = kubeconfig_path
@@ -89,11 +92,46 @@ class KubernetesAdapter(ClusterProviderPort):
     def get_resource(self, kind: str, name: str, namespace: str) -> Optional[KubernetesResource]:
         pass
 
+    def delete_resource(self, kind: str, name: str, namespace: str) -> bool:
+        # Simplest: use kubectl delete
+        import subprocess
+        cmd = ["kubectl", "delete", kind, name]
+        if namespace:
+            cmd.extend(["-n", namespace])
+        
+        env = os.environ.copy()
+        if self.kubeconfig_path:
+            env["KUBECONFIG"] = self.kubeconfig_path
+            
+        try:
+            res = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return res.returncode == 0
+        except:
+            return False
+
+    def get_managed_resources(self) -> List[KubernetesResource]:
+        all_res = self.list_resources()
+        managed = []
+        for r in all_res:
+            meta = r.content.get("metadata", {})
+            anns = meta.get("annotations", {})
+            if anns and anns.get(KORTEX_ANNOTATION) == KORTEX_VALUE:
+                managed.append(r)
+        return managed
+
     def apply_manifest(self, manifest: Dict[str, Any], namespace: str) -> bool:
         # Use kubectl apply for robustness
         import json
         import subprocess
         
+        # Inject Annotation
+        if "metadata" not in manifest:
+            manifest["metadata"] = {}
+        if "annotations" not in manifest["metadata"] or manifest["metadata"]["annotations"] is None:
+            manifest["metadata"]["annotations"] = {}
+        
+        manifest["metadata"]["annotations"][KORTEX_ANNOTATION] = KORTEX_VALUE
+
         manifest_json = json.dumps(manifest)
         
         # Ensure we use the correct kubectl if bundled or relying on PATH

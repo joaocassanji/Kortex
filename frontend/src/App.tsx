@@ -1,23 +1,39 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
-import { Layout, Server, Activity, Settings, ChevronRight, ChevronLeft } from 'lucide-react'
+import { Layout, Activity, Settings, ChevronRight, ChevronLeft, Map, Microscope, BarChart3 } from 'lucide-react'
 import ClusterGraph from './components/ClusterGraph'
 import ActivityLog from './components/ActivityLog'
 import ClusterWizard from './components/ClusterWizard'
 import SettingsModal from './components/SettingsModal'
+import ScanDashboard from './components/ScanDashboard'
+import ReportsDashboard from './components/ReportsDashboard'
 
 function App() {
-    const [activeTab, setActiveTab] = useState<'graph' | 'analysis'>('graph')
-    const [isConnected, setIsConnected] = useState(false)
-    const [clusterName, setClusterName] = useState('')
-    const [activeClusterId, setActiveClusterId] = useState('')
+    const [activeTab, setActiveTab] = useState<'graph' | 'analysis' | 'reports'>('graph')
+
+    // Lazy init from localStorage to prevent flash
+    const [isConnected, setIsConnected] = useState(() => !!localStorage.getItem('kortex_active_cluster_id'))
+    const [clusterName, setClusterName] = useState(() => localStorage.getItem('kortex_active_cluster_name') || '')
+    const [activeClusterId, setActiveClusterId] = useState(() => localStorage.getItem('kortex_active_cluster_id') || '')
+
     const [isSettingsOpen, setIsSettingsOpen] = useState(false)
     const [isSidebarOpen, setIsSidebarOpen] = useState(true)
     const [dependencyLevel, setDependencyLevel] = useState(1)
 
+    const [activeScanId, setActiveScanId] = useState<string | null>(() => localStorage.getItem('kortex_active_scan_id'))
+
     useEffect(() => {
         fetchSettings();
     }, []);
+
+    // Persist scan ID whenever it changes
+    useEffect(() => {
+        if (activeScanId) {
+            localStorage.setItem('kortex_active_scan_id', activeScanId);
+        } else {
+            localStorage.removeItem('kortex_active_scan_id');
+        }
+    }, [activeScanId]);
 
     const fetchSettings = async () => {
         try {
@@ -34,6 +50,20 @@ function App() {
         setClusterName(name);
         setActiveClusterId(id);
         setIsConnected(true);
+        localStorage.setItem('kortex_active_cluster_id', id);
+        localStorage.setItem('kortex_active_cluster_name', name);
+    }
+
+    // ... existing ...
+
+    const handleDisconnect = () => {
+        setIsConnected(false);
+        setClusterName('');
+        setActiveClusterId('');
+        setActiveScanId(null);
+        localStorage.removeItem('kortex_active_cluster_id');
+        localStorage.removeItem('kortex_active_cluster_name');
+        localStorage.removeItem('kortex_active_scan_id');
     }
 
     const handleSettingsSaved = () => {
@@ -76,6 +106,29 @@ function App() {
                     <Layout className="w-6 h-6 text-primary" />
                     <h1 className="text-xl font-bold tracking-tight">Kortex <span className="text-xs font-normal text-muted-foreground ml-2">v0.1.0</span></h1>
                 </div>
+
+                {/* Navigation Tabs */}
+                <div className="flex items-center bg-muted/30 p-1 rounded-lg border border-border/50">
+                    <button
+                        onClick={() => setActiveTab('graph')}
+                        className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-all ${activeTab === 'graph' ? 'bg-primary text-primary-foreground shadow-md' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}`}
+                    >
+                        <Map size={14} /> Map
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('analysis')}
+                        className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-all ${activeTab === 'analysis' ? 'bg-primary text-primary-foreground shadow-md' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}`}
+                    >
+                        <Microscope size={14} /> Analysis
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('reports')}
+                        className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-all ${activeTab === 'reports' ? 'bg-primary text-primary-foreground shadow-md' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}`}
+                    >
+                        <BarChart3 size={14} /> Reports
+                    </button>
+                </div>
+
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2 text-sm text-green-400">
                         <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
@@ -93,18 +146,31 @@ function App() {
 
             {/* Main Content */}
             <main className="flex-1 flex overflow-hidden">
-                {/* Graph Area */}
-                <div className="flex-1 relative border-r border-border">
-                    <ClusterGraph dependencyLevel={dependencyLevel} />
-                    {/* Overlay Tools */}
-                    <div className="absolute top-4 left-4 bg-card/90 p-2 rounded-md border border-border shadow-lg">
-                        <h3 className="text-xs font-bold uppercase text-muted-foreground mb-2">Filters</h3>
-                        <div className="flex gap-2">
-                            <button className="text-xs px-2 py-1 bg-primary/20 text-primary rounded">Deployments</button>
-                            <button className="text-xs px-2 py-1 hover:bg-muted text-muted-foreground rounded">Services</button>
-                            <button className="text-xs px-2 py-1 hover:bg-muted text-muted-foreground rounded">Ingress</button>
-                        </div>
-                    </div>
+                {/* Content Area */}
+                <div className="flex-1 relative border-r border-border bg-black/5">
+                    {activeTab === 'graph' ? (
+                        <>
+                            <ClusterGraph dependencyLevel={dependencyLevel} onDisconnect={handleDisconnect} />
+                            {/* Overlay Tools */}
+                            <div className="absolute top-4 left-4 bg-card/90 p-2 rounded-md border border-border shadow-lg z-10">
+                                <h3 className="text-xs font-bold uppercase text-muted-foreground mb-2">Filters</h3>
+                                <div className="flex gap-2">
+                                    <button className="text-xs px-2 py-1 bg-primary/20 text-primary rounded">Deployments</button>
+                                    <button className="text-xs px-2 py-1 hover:bg-muted text-muted-foreground rounded">Services</button>
+                                    <button className="text-xs px-2 py-1 hover:bg-muted text-muted-foreground rounded">Ingress</button>
+                                </div>
+                            </div>
+                        </>
+                    ) : activeTab === 'analysis' ? (
+                        <ScanDashboard
+                            clusterId={activeClusterId}
+                            onDisconnect={handleDisconnect}
+                            activeScanId={activeScanId}
+                            onScanStarted={setActiveScanId}
+                        />
+                    ) : (
+                        <ReportsDashboard />
+                    )}
                 </div>
 
                 {/* Sidebar / Dashboard */}
@@ -136,7 +202,7 @@ function App() {
                     </div>
                 </div>
             </main>
-            <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+            <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} onSave={handleSettingsSaved} clusterId={activeClusterId} />
         </div>
     )
 }

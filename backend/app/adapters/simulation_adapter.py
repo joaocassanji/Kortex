@@ -75,7 +75,22 @@ class VClusterAdapter(SimulationEnginePort):
             print(f"VCluster creation failed: {full_msg}")
             raise RuntimeError(f"Failed to create shadow cluster: {full_msg}")
             
-        print("VCluster created. Starting background connect tunnel...")
+        
+        print("VCluster created. Annotating namespace for management...")
+        from app.adapters.k8s_adapter import KORTEX_ANNOTATION, KORTEX_VALUE
+        
+        # Annotate the namespace
+        cmd_ann = [
+            "kubectl", "annotate", "namespace", shadow_namespace,
+            f"{KORTEX_ANNOTATION}={KORTEX_VALUE}",
+            "--overwrite"
+        ]
+        def run_ann():
+            return subprocess.run(cmd_ann, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+        await loop.run_in_executor(None, run_ann)
+
+        print("Namespace annotated. Starting background connect tunnel...")
         
         # 2. Start Kubeconfig Export & Tunnel (Background)
         # vcluster connect ... --kube-config ...

@@ -18,9 +18,14 @@ const initialEdges: Edge[] = [];
 
 interface ClusterGraphProps {
     dependencyLevel?: number;
+    onDisconnect?: () => void;
+    // Controlled Mode Props
+    resources?: K8sResource[];
+    statusMap?: Record<string, 'pending' | 'analyzed' | 'error'>;
+    isLoading?: boolean;
 }
 
-export default function ClusterGraph({ dependencyLevel = 1 }: ClusterGraphProps) {
+export default function ClusterGraph({ dependencyLevel = 1, onDisconnect, resources: externalResources, statusMap, isLoading }: ClusterGraphProps) {
     const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
     const [menu, setMenu] = useState<{ id: string; top: number; left: number; resource: K8sResource } | null>(null);
@@ -30,13 +35,21 @@ export default function ClusterGraph({ dependencyLevel = 1 }: ClusterGraphProps)
     const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
     const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
 
+    // Keep track if we are in controlled mode
+    const isControlled = !!externalResources;
+
     // Fix Modal State
     const [activeIssueForFix, setActiveIssueForFix] = useState<any | null>(null);
 
     const fetchGraph = async () => {
+        if (isControlled) return; // Skip fetching if controlled
+
         try {
             const clusters = await axios.get('http://localhost:8000/clusters');
-            if (clusters.data.length === 0) return;
+            if (clusters.data.length === 0) {
+                if (onDisconnect) onDisconnect();
+                return;
+            }
 
             // Prefer the last connected cluster
             const activeCluster = clusters.data.find((c: any) => c.is_active) || clusters.data[clusters.data.length - 1];
@@ -48,14 +61,24 @@ export default function ClusterGraph({ dependencyLevel = 1 }: ClusterGraphProps)
             const resources = res.data;
 
             buildGraph(resources);
-        } catch (e) {
+        } catch (e: any) {
             console.error("Failed to fetch graph", e);
+            if (e.response && (e.response.status === 404 || e.response.status === 401)) {
+                if (onDisconnect) onDisconnect();
+            }
         }
     }
 
+    // Effect to build graph when external resources change
     useEffect(() => {
-        fetchGraph();
-    }, []);
+        if (isControlled && externalResources) {
+            buildGraph(externalResources);
+        }
+    }, [externalResources, isControlled]);
+
+    useEffect(() => {
+        if (!isControlled) fetchGraph();
+    }, [isControlled]);
 
     // Effect to handle highlighting when dependencyLevel or highlightedNodeId changes
     useEffect(() => {
@@ -149,6 +172,48 @@ export default function ClusterGraph({ dependencyLevel = 1 }: ClusterGraphProps)
         );
 
     }, [highlightedNodeId, dependencyLevel, edges.length]); // Re-run when these change
+
+    // Style nodes based on statusMap (Scan progress)
+    useEffect(() => {
+        if (!isControlled || !statusMap || nodes.length === 0) return;
+
+        setNodes((nds) => nds.map((node) => {
+            if (node.type === 'group') return node; // Skip group nodes
+
+            const status = statusMap[node.id] || 'pending';
+            let style = { ...node.style };
+
+            // Base style for consistency
+            if (status === 'analyzed') {
+                style.background = 'rgba(76, 175, 80, 0.1)';
+                style.borderColor = '#4caf50';
+                style.color = '#4caf50';
+                style.boxShadow = '0 0 10px rgba(76, 175, 80, 0.2)';
+                style.opacity = 1;
+            } else if (status === 'error') {
+                style.background = 'rgba(239, 68, 68, 0.1)';
+                style.borderColor = '#ef4444';
+                style.color = '#ef4444';
+                style.opacity = 1;
+            } else if (status === 'ignored') {
+                style.background = 'rgba(100, 116, 139, 0.05)';
+                style.borderColor = '#64748b';
+                style.color = '#64748b';
+                style.borderStyle = 'dashed';
+                style.opacity = 0.5;
+            } else if (status === 'pending') {
+                // Dim pending nodes slightly more but keep visible
+                style.background = '#0f172a';
+                style.borderColor = '#334155';
+                style.color = '#64748b';
+                style.opacity = 0.5;
+                style.boxShadow = 'none';
+            }
+
+            return { ...node, style };
+        }));
+
+    }, [isControlled, statusMap, nodes.length, setNodes]);
 
     const onNodeContextMenu = useCallback(
         (event: React.MouseEvent, node: Node) => {
@@ -570,38 +635,55 @@ export default function ClusterGraph({ dependencyLevel = 1 }: ClusterGraphProps)
                     onClick={handleMiniMapClick}
                     className="bg-slate-900"
                     nodeStrokeColor={(node) => {
-                        // Hide stroke for structural groups (no resource)
                         if (!node.data?.resource) return 'transparent';
 
+                        // If statusMap is active, handle strokes based on status
+                        if (statusMap) {
+                            const status = statusMap[node.id] || 'pending';
+                            if (status === 'pending') return '#334155'; // Visible low-contrast stroke for pending
+                            if (status === 'analyzed') return '#ffffff'; // Bright stroke for analyzed
+                            return 'transparent';
+                        }
+
+                        // Fallback to opacity check for highlight mode
                         const opacity = node.style?.opacity;
-                        // If dimmed, stroke should be transparent
                         if (opacity !== undefined && Number(opacity) < 1) return 'transparent';
-                        // Highlighted resources get a white border
                         return '#ffffff';
                     }}
                     nodeStrokeWidth={3}
                     nodeColor={(node) => {
-                        // Hide structural groups (no resource) to declutter MiniMap
                         if (!node.data?.resource) return 'transparent';
 
-                        const opacity = node.style?.opacity;
-                        // Consider dimmed if opacity is explicitly less than 1
-                        const isDimmed = opacity !== undefined && Number(opacity) < 1;
-
-                        if (isDimmed) return '#0f172a'; // Match background (or very dark) for dimmed
-
                         const resource = node.data.resource as K8sResource;
+                        let baseColor = '#64748b';
+
+                        // Determine Base Kind Color
                         switch (resource.kind) {
-                            case 'Pod': return '#4caf50';
-                            case 'Service': return '#2196f3';
-                            case 'Deployment': return '#ff9800';
-                            case 'Ingress': return '#9c27b0';
-                            case 'ConfigMap': return '#ffeb3b';
-                            case 'Node': return '#e2e8f0';
-                            case 'PersistentVolumeClaim': return '#3f51b5';
-                            case 'Secret': return '#f44336';
-                            default: return '#64748b';
+                            case 'Pod': baseColor = '#4caf50'; break;
+                            case 'Service': baseColor = '#2196f3'; break;
+                            case 'Deployment': baseColor = '#ff9800'; break;
+                            case 'Ingress': baseColor = '#9c27b0'; break;
+                            case 'ConfigMap': baseColor = '#ffeb3b'; break;
+                            case 'Node': baseColor = '#e2e8f0'; break;
+                            case 'PersistentVolumeClaim': baseColor = '#3f51b5'; break;
+                            case 'Secret': baseColor = '#f44336'; break;
                         }
+
+                        // Handle Status Overrides
+                        if (statusMap) {
+                            const status = statusMap[node.id] || 'pending';
+                            if (status === 'pending') return '#1e293b'; // Visible dark grey for pending
+                            if (status === 'error') return '#ef4444';   // Red for error
+                            // Analyzed -> Use Base Color
+                            return baseColor;
+                        }
+
+                        // Check for dimming (Highlight Mode)
+                        const opacity = node.style?.opacity;
+                        const isDimmed = opacity !== undefined && Number(opacity) < 1;
+                        if (isDimmed) return '#1e293b';
+
+                        return baseColor;
                     }}
                 />
                 <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="#334155" />

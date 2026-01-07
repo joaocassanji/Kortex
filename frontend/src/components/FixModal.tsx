@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Check, Loader, Terminal, ShieldCheck, CheckCircle } from 'lucide-react';
+import { X, Check, Loader, Terminal, ShieldCheck, CheckCircle, Download } from 'lucide-react';
 import { startFix, getFixStatus } from '../services/api';
 
 interface FixModalProps {
@@ -63,6 +63,30 @@ export default function FixModal({ isOpen, onClose, clusterId, issue, onFixCompl
         }, 1000);
         return () => clearInterval(interval);
     }, [workflowId]);
+
+    const handleExportLogs = () => {
+        const date = new Date().toLocaleString();
+        let content = `KORTEX REMEDIATION LOG\n`;
+        content += `=========================\n`;
+        content += `Date: ${date}\n`;
+        content += `Cluster: ${clusterId}\n`;
+        content += `Issue: ${issue?.title}\n`;
+        content += `Status: ${status?.status || 'N/A'}\n\n`;
+        content += `LOG ENTRIES:\n`;
+        logs.forEach(L => {
+            content += `[${date}] ${L}\n`;
+        });
+
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `kortex-fix-log-${issue?.id || 'unknown'}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
 
     // Scroll
     useEffect(() => {
@@ -174,12 +198,18 @@ export default function FixModal({ isOpen, onClose, clusterId, issue, onFixCompl
                                         <h3 className="text-green-400 font-bold">Fix Successfully Deployed</h3>
                                         <p className="text-xs text-green-400/60">System verified. VCluster teardown scheduled.</p>
                                     </div>
+                                    <button
+                                        onClick={handleExportLogs}
+                                        className="ml-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors border border-white/10"
+                                    >
+                                        <Download size={14} /> Export Log
+                                    </button>
                                     <button onClick={() => {
                                         if (issue?.resourceId && onFixComplete) {
                                             onFixComplete(issue.resourceId);
                                         }
                                         onClose();
-                                    }} className="ml-auto px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors shadow-lg shadow-green-900/20">
+                                    }} className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors shadow-lg shadow-green-900/20">
                                         Close
                                     </button>
                                 </div>
@@ -192,7 +222,13 @@ export default function FixModal({ isOpen, onClose, clusterId, issue, onFixCompl
                                         <h3 className="text-red-400 font-bold">Remediation Failed</h3>
                                         <p className="text-xs text-red-400/60">Check logs for details. System rolled back.</p>
                                     </div>
-                                    <button onClick={onClose} className="ml-auto px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg font-medium transition-colors">
+                                    <button
+                                        onClick={handleExportLogs}
+                                        className="ml-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors border border-white/10"
+                                    >
+                                        <Download size={14} /> Export Log
+                                    </button>
+                                    <button onClick={onClose} className="px-6 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg font-medium transition-colors">
                                         Dismiss
                                     </button>
                                 </div>

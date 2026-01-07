@@ -4,6 +4,8 @@ Thumbs.db
 *.log
 .idea/
 .vscode/
+*.swp
+*.swo
 
 # Python / Backend
 backend/__pycache__/
@@ -13,24 +15,43 @@ backend/venv/
 backend/.venv/
 backend/env/
 backend/.env
+backend/.env.*
 backend/.pytest_cache/
+backend/coverage/
+backend/htmlcov/
+backend/.coverage
+
+# Project Data & Binaries (Client Specific / Sensitive)
+backend/data/
 backend/temp_vclusters/
 backend/saved_clusters.json
 backend/settings.json
 backend/*.exe
-# Ignore locally downloaded tools if appropriate, generally good practice to not commit binaries
+backend/*.db
+backend/*.sqlite
+backend/charts/
+
+# Tools binaries (if downloaded locally)
 *.exe
 *.dll
+*.so
+*.dylib
 
 # Node.js / Frontend
 frontend/node_modules/
 frontend/dist/
 frontend/build/
 frontend/.env
-frontend/.env.local
-frontend/.env.development.local
-frontend/.env.test.local
-frontend/.env.production.local
+frontend/.env.*
+!frontend/.env.example
 frontend/npm-debug.log*
 frontend/yarn-debug.log*
 frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+frontend/.eslintcache
+frontend/coverage/
+
+# OS Generated
+.Spotlight-V100
+.Trashes
+ehthumbs.db
